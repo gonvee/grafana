@@ -690,4 +690,8 @@ const (
 	// FlagDashboardRestore
 	// Enables deleted dashboard restore feature
 	FlagDashboardRestore = "dashboardRestore"
+
+	// FlagAlertingDisableSendAlertsExternal
+	// Disables the ability to send alerts to an external Alertmanager datasource.
+	FlagAlertingDisableSendAlertsExternal = "alertingDisableSendAlertsExternal"
 )
