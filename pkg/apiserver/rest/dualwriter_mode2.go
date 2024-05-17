@@ -31,34 +31,22 @@ func NewDualWriterMode2(legacy LegacyStorage, storage Storage) *DualWriterMode2 
 }
 
 // Create overrides the behavior of the generic DualWriter and writes to LegacyStorage and Storage.
-func (d *DualWriterMode2) Create(ctx context.Context, obj runtime.Object, createValidation rest.ValidateObjectFunc, options *metav1.CreateOptions) (runtime.Object, error) {
+func (d *DualWriterMode2) Create(ctx context.Context, original runtime.Object, createValidation rest.ValidateObjectFunc, options *metav1.CreateOptions) (runtime.Object, error) {
 	ctx = klog.NewContext(ctx, d.Log)
 
-	created, err := d.Legacy.Create(ctx, obj, createValidation, options)
+	created, err := d.Legacy.Create(ctx, original, createValidation, options)
 	if err != nil {
 		d.Log.Error(err, "unable to create object in legacy storage")
 		return created, err
 	}
 
-	accessorCreated, err := meta.Accessor(created)
-	if err != nil {
-		return created, err
+	if err := enrichReturnedObject(&original, &created); err != nil {
+		return nil, err
 	}
-
-	accessorOld, err := meta.Accessor(obj)
-	if err != nil {
-		return created, err
-	}
-
-	enrichObject(accessorOld, accessorCreated)
-
-	// create method expects an empty resource version
-	accessorCreated.SetResourceVersion("")
-	accessorCreated.SetUID("")
 
 	rsp, err := d.Storage.Create(ctx, created, createValidation, options)
 	if err != nil {
-		d.Log.WithValues("name", accessorCreated.GetName(), "resourceVersion", accessorCreated.GetResourceVersion()).Error(err, "unable to create object in duplicate storage")
+		d.Log.WithValues("kind", options.Kind).Error(err, "unable to create object in storage")
 	}
 	return rsp, err
 }
@@ -194,11 +182,11 @@ func (d *DualWriterMode2) Update(ctx context.Context, name string, objInfo rest.
 	log := d.Log.WithValues("name", name)
 	ctx = klog.NewContext(ctx, log)
 
-	// get old and new (updated) object so they can be stored in legacy store
-	old, err := d.Storage.Get(ctx, name, &metav1.GetOptions{})
+	// get original and new (updated) object so they can be stored in legacy store
+	original, err := d.Storage.Get(ctx, name, &metav1.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
-			log.WithValues("object", old).Error(err, "could not get object to update")
+			log.WithValues("object", original).Error(err, "could not get object to update")
 			return nil, false, err
 		}
 		notFound = true
@@ -206,41 +194,29 @@ func (d *DualWriterMode2) Update(ctx context.Context, name string, objInfo rest.
 	}
 
 	// obj can be populated in case it's found or empty in case it's not found
-	updated, err := objInfo.UpdatedObject(ctx, old)
+	updated, err := objInfo.UpdatedObject(ctx, original)
 	if err != nil {
 		log.WithValues("object", updated).Error(err, "could not update or create object")
 		return nil, false, err
 	}
 
-	obj, created, err := d.Legacy.Update(ctx, name, &updateWrapper{upstream: objInfo, updated: updated}, createValidation, updateValidation, forceAllowCreate, options)
+	returned, created, err := d.Legacy.Update(ctx, name, &updateWrapper{upstream: objInfo, updated: updated}, createValidation, updateValidation, forceAllowCreate, options)
 	if err != nil {
-		log.WithValues("object", obj).Error(err, "could not update in legacy storage")
-		return obj, created, err
+		log.WithValues("object", returned).Error(err, "could not update in legacy storage")
+		return returned, created, err
 	}
 
 	if notFound {
 		return d.Storage.Update(ctx, name, objInfo, createValidation, updateValidation, forceAllowCreate, options)
 	}
 
-	accessor, err := meta.Accessor(obj)
-	if err != nil {
+	if err := enrichReturnedObject(&original, &returned); err != nil {
 		return nil, false, err
 	}
 
-	// only if object exists
-	accessorOld, err := meta.Accessor(old)
-	if err != nil {
-		return nil, false, err
-	}
-
-	enrichObject(accessorOld, accessor)
-
-	// keep the same UID and resource_version
-	accessor.SetResourceVersion(accessorOld.GetResourceVersion())
-	accessor.SetUID(accessorOld.GetUID())
 	objInfo = &updateWrapper{
 		upstream: objInfo,
-		updated:  obj,
+		updated:  returned,
 	}
 
 	// TODO: relies on GuaranteedUpdate creating the object if
@@ -305,12 +281,25 @@ func parseList(legacyList []runtime.Object) (metainternalversion.ListOptions, ma
 	return options, indexMap, nil
 }
 
-func enrichObject(accessorO, accessorC metav1.Object) {
-	accessorC.SetLabels(accessorO.GetLabels())
+func enrichReturnedObject(originalObj, returnedObj *runtime.Object) error {
+	accessorReturned, err := meta.Accessor(returnedObj)
+	if err != nil {
+		return err
+	}
 
-	ac := accessorC.GetAnnotations()
-	for k, v := range accessorO.GetAnnotations() {
+	accessorOriginal, err := meta.Accessor(originalObj)
+	if err != nil {
+		return err
+	}
+
+	accessorReturned.SetLabels(accessorOriginal.GetLabels())
+
+	ac := accessorReturned.GetAnnotations()
+	for k, v := range accessorOriginal.GetAnnotations() {
 		ac[k] = v
 	}
-	accessorC.SetAnnotations(ac)
+	accessorReturned.SetAnnotations(ac)
+	accessorReturned.SetResourceVersion(accessorOriginal.GetResourceVersion())
+	accessorReturned.SetUID(accessorOriginal.GetUID())
+	return nil
 }
