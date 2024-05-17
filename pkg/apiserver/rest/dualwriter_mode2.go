@@ -40,8 +40,9 @@ func (d *DualWriterMode2) Create(ctx context.Context, original runtime.Object, c
 		return created, err
 	}
 
-	if err := enrichReturnedObject(&original, &created); err != nil {
-		return nil, err
+	created, err = enrichReturnedObject(original, created, true)
+	if err != nil {
+		return created, err
 	}
 
 	rsp, err := d.Storage.Create(ctx, created, createValidation, options)
@@ -210,8 +211,9 @@ func (d *DualWriterMode2) Update(ctx context.Context, name string, objInfo rest.
 		return d.Storage.Update(ctx, name, objInfo, createValidation, updateValidation, forceAllowCreate, options)
 	}
 
-	if err := enrichReturnedObject(&original, &returned); err != nil {
-		return nil, false, err
+	returned, err = enrichReturnedObject(original, returned, false)
+	if err != nil {
+		return returned, false, err
 	}
 
 	objInfo = &updateWrapper{
@@ -281,25 +283,35 @@ func parseList(legacyList []runtime.Object) (metainternalversion.ListOptions, ma
 	return options, indexMap, nil
 }
 
-func enrichReturnedObject(originalObj, returnedObj *runtime.Object) error {
+func enrichReturnedObject(originalObj, returnedObj runtime.Object, created bool) (runtime.Object, error) {
 	accessorReturned, err := meta.Accessor(returnedObj)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	accessorOriginal, err := meta.Accessor(originalObj)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	accessorReturned.SetLabels(accessorOriginal.GetLabels())
 
 	ac := accessorReturned.GetAnnotations()
+	if ac == nil {
+		ac = map[string]string{}
+	}
 	for k, v := range accessorOriginal.GetAnnotations() {
 		ac[k] = v
 	}
 	accessorReturned.SetAnnotations(ac)
+
+	// if the object is created, we need to reset the resource version and UID
+	if created {
+		accessorReturned.SetResourceVersion("")
+		accessorReturned.SetUID("")
+		return returnedObj, nil
+	}
 	accessorReturned.SetResourceVersion(accessorOriginal.GetResourceVersion())
 	accessorReturned.SetUID(accessorOriginal.GetUID())
-	return nil
+	return returnedObj, nil
 }
