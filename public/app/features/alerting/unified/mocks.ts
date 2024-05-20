@@ -310,15 +310,26 @@ export const mockSilence = (partial: Partial<Silence> = {}): Silence => {
 };
 
 export const MOCK_SILENCE_ID_EXISTING = 'f209e273-0e4e-434f-9f66-e72f092025a2';
+export const MOCK_SILENCE_ID_EXISTING_ALERT_RULE_UID = '5f7d08cd-ac62-432e-8449-8c20c95c19b6';
+export const MOCK_SILENCE_ID_EXPIRED = '145884a8-ee20-4864-9f84-661305fb7d82';
 
 export const mockSilences = [
-  mockSilence({ id: MOCK_SILENCE_ID_EXISTING }),
+  mockSilence({ id: MOCK_SILENCE_ID_EXISTING, comment: 'Happy path silence' }),
   mockSilence({
     id: 'ce031625-61c7-47cd-9beb-8760bccf0ed7',
     matchers: parseMatchers('foo!=bar'),
-    comment: 'Catch all',
+    comment: 'Silence with negated matcher',
   }),
-  mockSilence({ id: '145884a8-ee20-4864-9f84-661305fb7d82', status: { state: SilenceState.Expired } }),
+  mockSilence({
+    id: MOCK_SILENCE_ID_EXPIRED,
+    status: { state: SilenceState.Expired },
+    comment: 'Silence which is expired',
+  }),
+  mockSilence({
+    id: MOCK_SILENCE_ID_EXISTING_ALERT_RULE_UID,
+    matchers: parseMatchers('__alert_rule_uid__=ajksghd'),
+    comment: 'Silence with alert rule UID matcher',
+  }),
 ];
 
 export const mockNotifiersState = (partial: Partial<NotifiersState> = {}): NotifiersState => {

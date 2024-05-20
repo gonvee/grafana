@@ -7,7 +7,7 @@ import { useQueryParams } from 'app/core/hooks/useQueryParams';
 import { alertSilencesApi } from 'app/features/alerting/unified/api/alertSilencesApi';
 import { alertmanagerApi } from 'app/features/alerting/unified/api/alertmanagerApi';
 import { featureDiscoveryApi } from 'app/features/alerting/unified/api/featureDiscoveryApi';
-import { SILENCES_POLL_INTERVAL_MS } from 'app/features/alerting/unified/utils/constants';
+import { MATCHER_ALERT_RULE_UID, SILENCES_POLL_INTERVAL_MS } from 'app/features/alerting/unified/utils/constants';
 import { getDatasourceAPIUid } from 'app/features/alerting/unified/utils/datasource';
 import { AlertmanagerAlert, Silence, SilenceState } from 'app/plugins/datasource/alertmanager/types';
 
@@ -49,7 +49,7 @@ const SilencesTable = ({ alertManagerSourceName }: Props) => {
     isLoading,
     error,
   } = alertSilencesApi.endpoints.getSilences.useQuery(
-    { datasourceUid: getDatasourceAPIUid(alertManagerSourceName) },
+    { datasourceUid: getDatasourceAPIUid(alertManagerSourceName), withMetadata: true },
     API_QUERY_OPTIONS
   );
 
@@ -253,16 +253,33 @@ function useColumns(alertManagerSourceName: string) {
         size: 4,
       },
       {
+        id: 'alert-rule',
+        label: 'Alert rule targeted',
+        renderCell: function renderMatchers({ data: { metadata } }) {
+          return metadata?.rule_title ? (
+            <Link
+              href={`/alerting/grafana/${metadata?.rule_uid}/view?returnTo=${encodeURIComponent('/alerting/silences')}`}
+            >
+              {metadata.rule_title}
+            </Link>
+          ) : (
+            '-'
+          );
+        },
+        size: 10,
+      },
+      {
         id: 'matchers',
         label: 'Matching labels',
         renderCell: function renderMatchers({ data: { matchers } }) {
-          return <Matchers matchers={matchers || []} />;
+          const filteredMatchers = matchers?.filter((matcher) => matcher.name !== MATCHER_ALERT_RULE_UID) || [];
+          return <Matchers matchers={filteredMatchers} />;
         },
         size: 10,
       },
       {
         id: 'alerts',
-        label: 'Alerts',
+        label: 'Alerts silenced',
         renderCell: function renderSilencedAlerts({ data: { silencedAlerts } }) {
           return <span data-testid="alerts">{silencedAlerts.length}</span>;
         },
@@ -286,14 +303,17 @@ function useColumns(alertManagerSourceName: string) {
         size: 7,
       },
     ];
-    if (updateSupported && updateAllowed) {
+    if (true || (updateSupported && updateAllowed)) {
       columns.push({
         id: 'actions',
         label: 'Actions',
         renderCell: function renderActions({ data: silence }) {
+          const isExpired = silence.status.state === 'expired';
+          const canRecreate = isExpired && silence.metadata?.permissions?.create;
+          const canEdit = Boolean(!isExpired && silence.metadata?.permissions?.write);
           return (
             <Stack gap={0.5}>
-              {silence.status.state === 'expired' ? (
+              {canRecreate ? (
                 <Link href={makeAMLink(`/alerting/silence/${silence.id}/edit`, alertManagerSourceName)}>
                   <ActionButton icon="sync">Recreate</ActionButton>
                 </Link>
@@ -302,7 +322,7 @@ function useColumns(alertManagerSourceName: string) {
                   Unsilence
                 </ActionButton>
               )}
-              {silence.status.state !== 'expired' && (
+              {canEdit && (
                 <ActionIcon
                   to={makeAMLink(`/alerting/silence/${silence.id}/edit`, alertManagerSourceName)}
                   icon="pen"

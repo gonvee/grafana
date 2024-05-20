@@ -199,6 +199,12 @@ export type Silence = {
   status: {
     state: SilenceState;
   };
+  metadata?: {
+    rule_uid?: string;
+    rule_title?: string;
+    folder_uid?: string;
+    permissions?: Record<'create' | 'read' | 'write', unknown>;
+  };
 };
 
 export type SilenceCreatePayload = {

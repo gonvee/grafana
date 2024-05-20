@@ -7,6 +7,7 @@ import { selectors } from '@grafana/e2e-selectors';
 import { config, locationService, setDataSourceSrv } from '@grafana/runtime';
 import { setupMswServer } from 'app/features/alerting/unified/mockApi';
 import { waitForServerRequest } from 'app/features/alerting/unified/mocks/server/events';
+import { MOCK_GRAFANA_ALERT_RULE_TITLE } from 'app/features/alerting/unified/mocks/server/handlers/alertRules';
 import {
   MOCK_DATASOURCE_UID_BROKEN_ALERTMANAGER,
   MOCK_DATASOURCE_NAME_BROKEN_ALERTMANAGER,
@@ -16,8 +17,14 @@ import { MatcherOperator } from 'app/plugins/datasource/alertmanager/types';
 import { AccessControlAction } from 'app/types';
 
 import Silences from './Silences';
-import { grantUserPermissions, MOCK_SILENCE_ID_EXISTING, mockDataSource, MockDataSourceSrv } from './mocks';
-import { AlertmanagerProvider } from './state/AlertmanagerContext';
+import {
+  grantUserPermissions,
+  MOCK_SILENCE_ID_EXISTING,
+  MOCK_SILENCE_ID_EXISTING_ALERT_RULE_UID,
+  mockDataSource,
+  MockDataSourceSrv,
+  mockSilences,
+} from './mocks';
 import { setupDataSources } from './testSetup/datasources';
 import { DataSourceType } from './utils/datasource';
 
@@ -26,17 +33,11 @@ jest.mock('app/core/services/context_srv');
 const TEST_TIMEOUT = 60000;
 
 const renderSilences = (location = '/alerting/silences/') => {
-  locationService.push(location);
-  return render(
-    <AlertmanagerProvider accessType="instance">
-      <Silences />
-    </AlertmanagerProvider>,
-    {
-      historyOptions: {
-        initialEntries: [location],
-      },
-    }
-  );
+  return render(<Silences />, {
+    historyOptions: {
+      initialEntries: [location],
+    },
+  });
 };
 
 const dataSources = {
@@ -133,10 +134,11 @@ describe('Silences', () => {
       expect(ui.expiredTable.get()).toBeInTheDocument();
 
       const allSilences = ui.silenceRow.queryAll();
-      expect(allSilences).toHaveLength(3);
+      expect(allSilences).toHaveLength(mockSilences.length);
       expect(allSilences[0]).toHaveTextContent('foo=bar');
       expect(allSilences[1]).toHaveTextContent('foo!=bar');
-      expect(allSilences[2]).toHaveTextContent('foo=bar');
+      expect(allSilences[2]).toHaveTextContent('__alert_rule_uid__');
+      expect(allSilences[3]).toHaveTextContent('foo=bar');
 
       await user.click(ui.expiredCaret.get());
 
@@ -144,7 +146,7 @@ describe('Silences', () => {
       expect(ui.expiredTable.query()).not.toBeInTheDocument();
 
       const activeSilences = ui.silenceRow.queryAll();
-      expect(activeSilences).toHaveLength(2);
+      expect(activeSilences).toHaveLength(3);
       expect(activeSilences[0]).toHaveTextContent('foo=bar');
       expect(activeSilences[1]).toHaveTextContent('foo!=bar');
     },
@@ -161,6 +163,7 @@ describe('Silences', () => {
       expect(notExpiredTable).toBeInTheDocument();
 
       const silencedAlertRows = await ui.silencedAlertCell.findAll(notExpiredTable);
+
       expect(silencedAlertRows[0]).toHaveTextContent('2');
       expect(silencedAlertRows[1]).toHaveTextContent('0');
     },
@@ -175,8 +178,8 @@ describe('Silences', () => {
 
       const queryBar = await ui.queryBar.find();
       await user.type(queryBar, 'foo=bar');
-
-      await waitFor(() => expect(ui.silenceRow.getAll()).toHaveLength(2));
+      await screen.findByRole('button', { name: /clear filters/i });
+      expect(ui.silenceRow.getAll()).toHaveLength(1);
     },
     TEST_TIMEOUT
   );
@@ -321,7 +324,13 @@ describe('Silence create/edit', () => {
     // existing fields have been filled out as well
     await waitFor(() => expect(ui.editor.matcherName.get()).toHaveValue('foo'));
     expect(ui.editor.matcherValue.get()).toHaveValue('bar');
-    expect(ui.editor.comment.get()).toHaveValue('Silence noisy alerts');
+    expect(ui.editor.comment.get()).toHaveValue('Happy path silence');
+  });
+
+  it('populates form with existing silence information that has __alert_rule_uid__', async () => {
+    renderSilences(`/alerting/silence/${MOCK_SILENCE_ID_EXISTING_ALERT_RULE_UID}/edit`);
+
+    expect(await screen.findByLabelText(/alert rule/i)).toHaveValue(MOCK_GRAFANA_ALERT_RULE_TITLE);
   });
 
   it(
